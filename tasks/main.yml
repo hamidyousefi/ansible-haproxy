@@ -1,0 +1,44 @@
+---
+- name: install necessary packages
+  apt:
+    name: haproxy
+    force_apt_get: yes
+    update_cache: yes
+  notify:
+    - enable and start haproxy
+
+- name: make necessary directories
+  file:
+    path: /etc/haproxy/certs
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: copy existing cert files
+  copy:
+    src: '{{ haproxy_cert_file }}'
+    dest: '/etc/haproxy/certs/{{ haproxy_cert_file | basename }}'
+    owner: root
+    group: root
+    mode: '0600'
+  when:
+    - haproxy_cert_file != ''
+
+- name: create dhparam file
+  openssl_dhparam:
+    state: present
+    path: /etc/haproxy/certs/dhparam.pem
+    size: 4096
+  when:
+    - haproxy_cert_file != ''
+
+- name: configure haproxy
+  template:
+    src: haproxy.conf.j2
+    dest: /etc/haproxy/haproxy.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - restart haproxy

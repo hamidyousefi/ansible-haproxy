@@ -1,0 +1,6 @@
+---
+haproxy_maxconn: 40960
+haproxy_stats_username: haproxy
+haproxy_stats_password: haproxy
+haproxy_cert_file: ''
+haproxy_endpoints: []

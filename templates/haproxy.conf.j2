@@ -1,0 +1,87 @@
+global
+  daemon
+  maxconn {{ haproxy_maxconn }}
+
+  chroot /var/lib/haproxy
+  pidfile /var/run/haproxy.pid
+
+  user haproxy
+  group haproxy
+
+  stats socket /var/lib/haproxy/admin.sock mode 660 level admin expose-fd listeners
+  stats timeout 5s
+
+  log /dev/log local0
+  log /dev/log local1 notice
+
+  {% if haproxy_cert_file != '' -%}
+  ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+  ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+  ssl-default-bind-options prefer-client-ciphers no-sslv3 no-tlsv10 no-tlsv11 no-tls-tickets
+  ssl-default-server-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+  ssl-default-server-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+  ssl-default-server-options no-sslv3 no-tlsv10 no-tlsv11 no-tls-tickets
+  ssl-dh-param-file /etc/haproxy/certs/dhparam.pem
+  {%- endif -%}
+
+defaults
+  mode http
+  log global
+
+  option httplog
+  option dontlognull
+  option http-server-close
+  option forwardfor except 127.0.0.0/8
+
+  retries 2
+  timeout http-request 10s
+  timeout queue 60s
+  timeout connect 10s
+  timeout client 45s
+  timeout server 15s
+  timeout http-keep-alive 10s
+  timeout check 5s
+
+  errorfile 400 /etc/haproxy/errors/400.http
+  errorfile 403 /etc/haproxy/errors/403.http
+  errorfile 408 /etc/haproxy/errors/408.http
+  errorfile 500 /etc/haproxy/errors/500.http
+  errorfile 502 /etc/haproxy/errors/502.http
+  errorfile 503 /etc/haproxy/errors/503.http
+  errorfile 504 /etc/haproxy/errors/504.http
+
+listen stats
+  description Connection Stats
+  bind 127.0.0.1:1986
+  stats enable
+  stats uri /
+  stats refresh 15s
+  stats admin if TRUE
+  stats hide-version
+  stats show-node
+  stats auth {{ haproxy_stats_username }}:{{ haproxy_stats_password }}
+
+frontend ALL
+  bind {{ ansible_host }}:80
+  {% if haproxy_cert_file != '' -%}
+  bind {{ ansible_host }}:443 ssl crt /etc/haproxy/certs/{{ haproxy_cert_file | basename }} alpn h2,http/1.1
+
+  http-request redirect scheme https code 301 if !{ ssl_fc }
+  http-request set-header X-Forwarded-Proto https
+  http-request set-header http-x-forwarded-proto https
+  {% endif -%}
+
+  http-response set-header Strict-Transport-Security max-age=63072000
+
+  {% for endpoint in haproxy_endpoints -%}
+  acl {{ endpoint.name | lower }} -i {{ endpoint.domain }}
+  {% endfor %}
+
+  {% for endpoint in haproxy_endpoints -%}
+  use_backend {{ endpoint.name | upper }} if {{ endpoint.name | lower }}
+  {% endfor %}
+
+{% for endpoint in haproxy_endpoints %}
+backend {{ endpoint.name | upper }}
+  server {{ endpoint.url }} {{ endpoint.url }}:{{ endpoint.port }}
+{%- endfor %}
